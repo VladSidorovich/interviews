@@ -361,7 +361,7 @@ Tooltip под кнопкой: в **`useEffect`** — вставили в DOM �
 
 ## Уровень 4
 
-По каждой теме — **один короткий вопрос**, затем **«Суть (устно)»** и эталоны по грейдам.
+По каждой теме — **один короткий вопрос**, затем **«Суть (устно)»** (развёрнутый ориентир для интервьюера) и эталоны по грейдам.
 
 ---
 
@@ -371,9 +371,12 @@ Tooltip под кнопкой: в **`useEffect`** — вставили в DOM �
 
 **Суть (устно):**
 
-- **`ref`** на function component **не работает** без **`forwardRef`** — ref идёт на **DOM** или **imperative API** дочернего компонента.
-- **`useImperativeHandle(ref, () => ({ focus, scroll }), deps)`** — ограничить наружный API (не отдавать весь DOM node).
-- Use case: **input** библиотеки, **modal focus**, integration с non-React.
+- **`ref`** на нативном `<input ref={r} />` даёт **DOM-узел** — можно вызвать `r.current.focus()`, прочитать value, measure.
+- На **своём** function component ref **сам не прилипает** — React не знает, **куда** его пробросить внутри (input? div? несколько узлов?).
+- **`forwardRef((props, ref) => …)`** — «принимаю ref от родителя и вешаю на **конкретный** внутренний узел» (часто `<input ref={ref} />`).
+- **`useImperativeHandle(ref, () => ({ focus, clear }), deps)`** — родителю отдаёшь **не весь DOM**, а **узкий API**: только `focus()`, `reset()`, `scrollTo()`. Инкапсуляция UI-библиотеки.
+- **Данные** (value, onChange, disabled) — по-прежнему **props**, не ref. Ref — для **imperative**: focus trap в modal, интеграция с jQuery/chart, scrollIntoView.
+- **React 19:** `ref` может быть обычным prop на function components — идея та же; `useImperativeHandle` всё ещё нужен, когда наружу **не** отдаёшь raw DOM.
 
 **🟡 Джун**
 
@@ -399,10 +402,13 @@ Tooltip под кнопкой: в **`useEffect`** — вставили в DOM �
 
 **Суть (устно):**
 
-- **Concurrent rendering** — React может **прерывать**, **возобновлять** и **приоритизировать** обновления (urgent vs transition).
-- **`startTransition(fn)`** / **`useTransition`** — пометить setState как **низкий приоритет**; UI остаётся отзывчивым (input).
-- **`useDeferredValue`** — отложить **отображение** тяжёлого значения, пока urgent обновления не завершены.
-- Не magic: **тяжёлый render** всё равно нужно оптимизировать или разбивать.
+- **Concurrent React** — React может **прервать** тяжёлый render, **сначала** отдать urgent-обновление (ввод в input), **потом** доделать тяжёлое (фильтрация 10k строк). Не «async/await в компоненте».
+- **`startTransition(() => setState(...))`** — помечает обновление как **низкий приоритет**. Пока фильтруется список, **клавиатура не лагает**.
+- **`useTransition()`** — даёт **`isPending`**: можно показать «обновляем…» на списке, input при этом живой.
+- **`useDeferredValue(deferredQuery)`** — «показывай **старое** значение query в тяжёлом списке, пока новое не посчиталось» — без отдельного state для debounce.
+- **vs debounce:** debounce **ждёт N ms тишины** по таймеру; transition — **приоритет в scheduler React**, без фиксированной задержки.
+- **Не магия:** тяжёлый render всё равно надо **оптимизировать** (virtualization, memo) — transition только **не блокирует** urgent UI.
+- Нужен **`createRoot`**, не legacy `ReactDOM.render`.
 
 **🟡 Джун**
 
@@ -427,13 +433,17 @@ Tooltip под кнопкой: в **`useEffect`** — вставили в DOM �
 
 **Суть (устно):**
 
-- **Lazy components** — throw promise при загрузке chunk → Suspense fallback.
-- **Data Suspense** — нужен **framework/cache**, который throw promise при pending (RSC, Relay, experimental routers).
-- **Nested Suspense** — гранулярные fallbacks; **avoid waterfall** через parallel fetching на уровне route/layout.
+- **Suspense** — «пока **не готово** — покажи fallback (spinner/skeleton)». Не ловит **ошибки** — для ошибок **Error Boundary**.
+- **Из коробки:** **`React.lazy`** — при загрузке JS-chunk компонент **throw promise** → Suspense ловит → fallback → chunk приехал → render.
+- **Data Suspense** — обычный `fetch` в `useEffect` **не работает** с Suspense. Нужен слой, который при pending **throw promise** (React Query suspense mode, Relay, RSC loaders, Next.js).
+- **Nested Suspense:** внешний — skeleton layout, внутренний — skeleton контента; пользователь видит **прогресс**, не белый экран.
+- **Waterfall:** page ждёт A, потом B, потом C — медленно. **Parallel fetch** в layout/route — все запросы сразу, каждый в своём Suspense boundary.
+- **Streaming SSR (Next):** сервер шлёт HTML **частями** — shell сразу, сегменты догружаются; клиент **hydrate** по кускам.
+- Рядом с Suspense — **Error Boundary**: loading fallback ≠ error fallback.
 
 **🟡 Джун**
 
-- Оборачиваю lazy-комponent: `<Suspense fallback={<Spinner />}><LazyPage /></Suspense>` — пока chunk грузится, spinner.
+- Оборачиваю lazy-компонент: `<Suspense fallback={<Spinner />}><LazyPage /></Suspense>` — пока chunk грузится, spinner.
 
 **🟠 Мидл**
 
@@ -454,10 +464,13 @@ Tooltip под кнопкой: в **`useEffect`** — вставили в DOM �
 
 **Суть (устно):**
 
-- **Manifest** — installability, icons, theme.
-- **Service Worker** — cache static assets, offline shell, **не** кэшировать API без стратегии.
-- **Workbox** / vite-plugin-pwa — precache bundle; **обновление** SW → prompt reload (`skipWaiting`).
-- React остаётся CSR внутри shell; **SSR/PWA** — offline fallback page.
+- **PWA** — сайт можно **установить** на устройство, работать **offline** (частично), как «приложение».
+- **`manifest.json`** — имя, иконки, theme-color, `display: standalone` — **installability**, не кэш.
+- **Service Worker** — прокси между сетью и cache: перехватывает запросы, отдаёт из cache или сеть по **стратегии**.
+- **React SPA:** SW обычно **precache** `index.html` + JS/CSS bundle — offline открывается **shell** приложения; **API** — чаще **network-first**, иначе stale/PII в cache.
+- **Обновление после deploy:** новый SW ждёт, пока закроют вкладки — показывают бanner «Доступна новая версия» → `skipWaiting` + reload.
+- **vite-plugin-pwa / Workbox** — генерация SW, precache manifest из сборки; руками SW пишут редко.
+- **HTTPS обязателен**; iOS — ограничения push/background vs Android.
 
 **🟡 Джун**
 
@@ -482,9 +495,13 @@ Tooltip под кнопкой: в **`useEffect`** — вставили в DOM �
 
 **Суть (устно):**
 
-- **Server Components** — рендер на сервере, **zero** client JS для них by default; **`'use client'`** — boundary.
-- **Caching:** `fetch` options, **`revalidate`**, **`unstable_cache`**, segment config **`dynamic`/`force-static`**.
-- **Layouts** сохраняют state при navigation; **parallel routes**, **intercepting routes** — advanced routing.
+- **SSR** — HTML приходит **с сервера**, пользователь видит контент **до** загрузки JS; потом **hydration** — React «оживляет» DOM.
+- **App Router (`app/`):** файлы = routes; **`layout.tsx`** — общая обёртка, **state layout сохраняется** при navigation между sibling pages.
+- **Server Components (RSC):** рендер **на сервере**, **не** попадают в client bundle по умолчанию — меньше JS. **Не могут** hooks, onClick, browser API.
+- **`'use client'`** — граница: ниже можно `useState`, effects, события. Props с сервера → клиент **сериализуются** (JSON); функции/classes **нельзя**.
+- **Кэширование `fetch`:** `cache: 'force-cache'`, **`next: { revalidate: 60 }`** (ISR — static, обновление раз в N сек), **`revalidateTag`/`revalidatePath`** после mutation.
+- **Server Actions** — форма/mutation на сервере без отдельного API route; после — revalidate cache.
+- **Hydration mismatch** — server HTML ≠ client first render → React warning; browser-only (`Date.now`, `window`) — только client component или `useEffect`.
 
 **🟡 Джун**
 
@@ -510,9 +527,13 @@ Tooltip под кнопкой: в **`useEffect`** — вставили в DOM �
 
 **Суть (устно):**
 
-- Философия: тест как **пользователь** — **roles**, **labels**, **text**, не implementation details (state, class names).
-- **`render`**, **`screen`**, **`userEvent`** (preferred over fireEvent), **`waitFor`**, **`findBy*`** для async.
-- **Mock** fetch/router на границе; **MSW** для API integration.
+- **Философия RTL:** тестируй **как пользователь** — что **видит** и **нажимает**, а не внутренности (`useState`, private methods, className ради className).
+- **Queries приоритет:** `getByRole` → `getByLabelText` → `getByText` → `getByTestId` (последний — escape hatch).
+- **`render(<App />)`** — монтирует в jsdom; **`screen`** — глобальные queries.
+- **`userEvent`** (не `fireEvent` по умолчанию) — реалистичнее: focus, keyboard, pointer; **`await`** обязателен.
+- **Async:** `findByText` (wait + get) или `waitFor(() => expect(...))` после fetch; без `await` — flaky.
+- **Mock на границе:** MSW для API, mock router — не mock `fetch` внутри каждого компонента.
+- **Custom render** — обёртка с Provider (QueryClient, Redux, Router) для integration tests feature-модуля.
 
 **🟡 Джун**
 
@@ -537,9 +558,14 @@ Tooltip под кнопкой: в **`useEffect`** — вставили в DOM �
 
 **Суть (устно):**
 
-- Context — **broadcast** значения без prop drilling: theme, locale, auth **snapshot**, dispatch-only context.
-- **Проблема:** любое изменение value → **все** consumers ререндер (если не split/memo).
-- **Паттерны:** разделить **StateContext** / **DispatchContext**; memoize value; **`useContextSelector`** (libs) или colocation.
+- **Context** — передать value **вниз по дереву** без prop drilling: theme, locale, auth snapshot, i18n.
+- **Механизм:** `<Provider value={x}>` → любой `useContext` **ниже** получает `x`.
+- **Проблема:** при **любом** изменении `value` **все** consumers **ререндерятся** — даже если им нужна только `theme`, а изменился `cart` в том же объекте.
+- **Split contexts:** `ThemeContext` + `CartContext` — меняется cart, theme consumers **не** трогаем.
+- **State + Dispatch split:** один context только с `dispatch` (стабильная ссылка), другой — state; или reducer pattern.
+- **`useMemo` на value** — `{ user, theme }` каждый render новый объект → лишние ререндеры даже без изменений.
+- **Когда не Context:** часто меняющийся state → **Zustand/Jotai** с selector; локальная проблема → **composition** (`children` slot), не global store.
+- **RSC:** context consumers — только в **`'use client'`** компонентах.
 
 **🟡 Джун**
 
@@ -564,9 +590,12 @@ Tooltip под кнопкой: в **`useEffect`** — вставили в DOM �
 
 **Суть (устно):**
 
-- Рендер children в **другой DOM node** (часто `document.body`) при сохранении **React tree** (events bubble по **React** иерархии, не DOM).
-- Modal, tooltip, dropdown — **escape overflow:hidden**, **z-index** stacking.
-- **Focus trap**, **aria-modal**, return focus on close — a11y обязательна.
+- **`createPortal(child, domNode)`** — React **рисует** `child` в **другой DOM-узел** (часто `document.body`), но в **React-дереве** child остаётся **ребёнком** того, кто вызвал portal.
+- **Зачем DOM другой:** modal/tooltip **поверх** всего — не обрезается `overflow: hidden`, не проигрывает **z-index** war в nested layout.
+- **События:** всплытие идёт по **React-дереву** (логический родитель), **не** по DOM-родителю в `body`. Handler на ancestor в React **получит** click из portal.
+- **Modal a11y:** `role="dialog"`, **`aria-modal`**, **focus trap** (Tab не уходит под modal), **Escape** закрывает, **return focus** на кнопку, открывшую dialog.
+- **SSR:** `document.body` на сервере нет — portal после mount или `dynamic(..., { ssr: false })`.
+- **Scroll lock** на `body` + **`inert`** на backdrop — фон не кликается и не фокусируется.
 
 **🟡 Джун**
 
@@ -590,10 +619,13 @@ Tooltip под кнопкой: в **`useEffect`** — вставили в DOM �
 
 **Суть (устно):**
 
-- Extract **stateful logic**: имя **`use*`**, вызывать только on top level / только из React functions.
-- **Contract:** входы, возвращаемое value/stable fns, **document deps** for caller.
-- **Composition:** маленькие hooks (`useToggle`, `useFetch`) → **`useUserProfile`**.
-- **Shared state:** hook с module-level store — осторожно; предпочитать context/external store.
+- **Custom hook** — функция **`use*`** , которая **внутри** вызывает hooks; выносит **stateful logic** без обёртки UI.
+- **Rules of Hooks:** только **top level** (не в if/for); только из **React functions** (component или другой hook) — иначе порядок hooks ломается.
+- **Контракт:** что принимает (url, options), что возвращает (`{ data, error, isLoading, refetch }`), какие **deps** у caller.
+- **Composition:** `useToggle` + `useFetch` → `useUserProfile`; маленькие кирпичики, не god-hook на 200 строк.
+- **Fetch hook:** **AbortController** при unmount и смене url; не `setState` после unmount.
+- **Module-level mutable** в hook — глобальный shared state; осторожно; для shared — context/Zustand явно.
+- **Тесты:** `renderHook` + `act`; публичный hook в lib — **semver** на shape return value.
 
 **🟡 Джун**
 
@@ -618,9 +650,13 @@ Tooltip под кнопкой: в **`useEffect`** — вставили в DOM �
 
 **Суть (устно):**
 
-- **Route-based** split — основной выигрыш; **component-level** `React.lazy`.
-- **Preload:** `import()` on **link hover/focus**, **`rel="modulepreload"`**, webpack **magic comments** `webpackPrefetch`, Next **`<Link prefetch>`**.
-- Balance: **too many chunks** → HTTP overhead; **analyze bundle**.
+- **Code splitting** — не один giant bundle, а **chunks**; пользователь качает JS **по мере надобности** — быстрее first load.
+- **Route-based split** — главный выигрыш: каждая страница = отдельный chunk (`React.lazy`, dynamic import в router/Next).
+- **`React.lazy(() => import('./Page'))`** + **Suspense** — chunk грузится при первом показе route.
+- **Preload:** `import('./Dashboard')` на **hover/focus** Link — к клику chunk уже в cache; Next **`<Link prefetch>`**; webpack **`webpackPrefetch`** comment.
+- **Слишком много chunks** — overhead HTTP/parse; баланс через **bundle analyzer**.
+- **Vendor chunk** — react/react-dom отдельно, cache надолго; **`sideEffects: false`** в package.json — tree-shaking.
+- **SSR:** split влияет на **TTFB** (меньше server work?) vs **client TTI** (меньше JS) — trade-off.
 
 **🟡 Джун**
 
@@ -645,10 +681,13 @@ Tooltip под кнопкой: в **`useEffect`** — вставили в DOM �
 
 **Суть (устно):**
 
-- Семантика: **button** vs div onClick; **labels** для inputs; **heading hierarchy**.
-- Keyboard: **focus order**, **Escape** закрывает modal, **roving tabindex** в menus.
-- **ARIA** когда нет нативного элемента; не дублировать роль нативного (`button role=button`).
-- Live regions: **`aria-live`** для toasts/async errors.
+- **Семантика:** `<button>` для действий, `<a href>` для навигации — не `<div onClick>` без role/keyboard.
+- **Формы:** `<label htmlFor={id}>` связан с input; ошибка — **`aria-invalid`**, **`aria-describedby`** на текст ошибки; после submit — **focus на первое** невалидное поле.
+- **Keyboard:** всё интерактивное **доступно с Tab**; modal — **focus trap**, **Escape** закрывает; menu — **roving tabindex** (стрелки между пунктами).
+- **ARIA** — когда **нет** нативного элемента (tabs, combobox custom); **не** дублировать нативное (`<button role="button">` — лишнее).
+- **`aria-live="polite"`** — toasts, async errors озвучиваются screen reader без перехвата focus.
+- **Focus ring** не вырезать в CSS (`outline: none` без замены) — видимый focus для keyboard users.
+- **Virtualized list:** в DOM не все rows — нужны **`aria-rowcount`**, keyboard nav sync с data index.
 
 **🟡 Джун**
 
@@ -673,9 +712,31 @@ Tooltip под кнопкой: в **`useEffect`** — вставили в DOM �
 
 **Суть (устно):**
 
-- **Colocation**, dynamic styles from props, theming via **ThemeProvider**.
-- **Runtime cost** — injection, specificity; **SSR** — **`ServerStyleSheet`**, hydrate class names.
-- **Trend:** zero-runtime (**Linaria**, **Vanilla Extract**, **Tailwind**) для performance.
+- **Runtime CSS-in-JS** (styled-components, Emotion): стили **в JS** рядом с компонентом — `` styled.button`padding: 8px` ``; при render библиотека **генерирует CSS** и **вставляет** в `<style>` в DOM. **Не runtime:** Tailwind, CSS Modules, Vanilla Extract — стили **на build**, в runtime только `className`.
+
+**Плюсы:**
+
+- **Colocation:** JSX и стили в **одном файле** — удобно для UI-библиотеки (Button, Modal), не прыгать между `.tsx` и `.module.css`.
+- **Scoped styles:** hashed class (`.sc-abc123`) — `.title` в Card и `.title` в Header **не конфликтуют**; в глобальном CSS один `.title` легко **ломает** чужой блок.
+- **Theming:** `ThemeProvider` + `theme.colors.primary` в styled — light/dark **одним** объектом theme; в CSS Modules theming чаще через **CSS variables**.
+- **Dynamic from props:** `` padding: ${p => p.$large ? '16px' : '8px'} `` — без ручного `className={cn(...)}`; transient props **`$variant`** не попадают в DOM.
+
+**Минусы (runtime):**
+
+- **CPU на каждый render:** styled строит строку CSS → `insertRule` в stylesheet; на **большом SPA** с частыми rerender (списки, dashboard) — нагрузка на main thread, хуже **INP**. Tailwind/CSS Modules — только **применить готовый класс**, без генерации CSS в runtime.
+- **Bundle и метрики:** + JS библиотеки styled-components; **hydration** сложнее — server injected styles должны **совпасть** с client.
+- **SSR (Next):** без **`ServerStyleSheet`** и cache server+client — **FOUC**, duplicate styles, wrong order.
+- **RSC:** styled-components требует **`'use client'`** → лишний client bundle; Tailwind/CSS Modules — классы прямо в **server HTML**.
+
+**Trend / когда что:**
+
+- Design system с variant из props — runtime ok или headless+Tailwind.
+- Performance-critical SPA, Next App Router — **compile-time** (Vanilla Extract, Linaria, **Pigment**) или Tailwind.
+
+**Пример для кандидата (устно):**
+
+Button с `$primary` — styled **на лету** красит фон; список из 500 карточек с разными props → много работы styled. Tailwind — `className="bg-blue-500"` — CSS уже в bundle, render дешевле.
+
 
 **🟡 Джун**
 
@@ -700,9 +761,12 @@ Tooltip под кнопкой: в **`useEffect`** — вставили в DOM �
 
 **Суть (устно):**
 
-- **Tree shaking** named imports; avoid barrel import whole lib.
-- **Theming:** `createTheme`, **`sx`**, **`styled` API** MUI.
-- **Trade-off:** скорость разработки vs bundle size vs design uniqueness.
+- **MUI / Chakra / Ant** — готовые компоненты + theming; **trade-off:** скорость разработки vs **bundle size** vs уникальный дизайн.
+- **Tree shaking:** `import Button from '@mui/material/Button'` — только Button; **`import { Button } from '@mui/material'`** — часто тянет лишнее (зависит от bundler).
+- **Icons:** `@mui/icons-material/Delete` по одному — не весь pack (тысячи icons).
+- **Theming:** `createTheme`, **`sx` prop**, `theme.components.MuiButton.styleOverrides` — кастом без fork компонента.
+- **SSR MUI:** **Emotion cache** на server + client — иначе duplicate styles, wrong order, hydration glitch.
+- **Headless alternative:** **Radix + Tailwind** — a11y/behavior из Radix, стили свои; MUI когда «Material look» или скорость важнее uniqueness.
 
 **🟡 Джун**
 
@@ -726,9 +790,13 @@ Tooltip под кнопкой: в **`useEffect`** — вставили в DOM �
 
 **Суть (устно):**
 
-- **RHF:** uncontrolled + ref, меньше ререндеров; **`register`**, **`controller`** для controlled third-party.
-- **Formik:** values in state, проще ментальная модель для маленьких форм.
-- Validation: **Yup/Zod** schema; **server errors** mapping to fields.
+- **Нативный controlled:** `useState` на поле — прозрачно, ok для **1–3 полей**; на 20+ — boilerplate и ререндеры.
+- **Formik:** все **`values`** в **state Formik** — controlled-модель; удобно для **маленьких** форм; каждый ввод → ререндер **всей** формы.
+- **React Hook Form:** **`register`** + ref — value в **DOM**, React не ререндерит на каждый символ; **`handleSubmit`** собирает data; **меньше** ререндеров на больших формах.
+- **`Controller`** (RHF) — для **controlled third-party** (MUI DatePicker, Select) — bridge value/onChange.
+- **Validation:** **Zod/Yup** schema + **`resolver`**; server errors map на `setError('email', { message })`.
+- **A11y:** error summary, **`aria-invalid`**, focus first error после submit.
+- **Next Server Actions:** form с **`action={serverFn}`** — работает без JS (progressive enhancement), React enhance сверху.
 
 **🟡 Джун**
 
@@ -736,7 +804,7 @@ Tooltip под кнопкой: в **`useEffect`** — вставили в DOM �
 
 **🟠 Мидл**
 
-- **Formik** — каждое поле трогает values в state → ререндер формы; ок для 5 полей.
+- **Formik** — каждое поле трогает values in state → ререндер формы; ok для 5 полей.
 - **RHF** — **`register('email')`** + ref, валидация **`resolver: zodResolver(schema)`**; **`Controller`** для MUI DatePicker (controlled third-party).
 
 **🔴 Сеньор**
@@ -753,9 +821,12 @@ Tooltip под кнопкой: в **`useEffect`** — вставили в DOM �
 
 **Суть (устно):**
 
-- **Recoil/Jotai:** atomic **fine-grained** subscriptions — компонент подписан на **atom**, не на весь store.
-- **Zustand:** простой store + selectors, minimal boilerplate.
-- **React Query/SWR:** **server state** отдельно от **client UI state** — не дублировать entities в Redux без нужды.
+- **Context:** один **`value`** на Provider → **любое** изменение ререндерит **всех** consumers (без split/selectors).
+- **Redux:** один **store**, подписка через **selector** / `useSelector` — ререндер когда **выбранный slice** изменился; boilerplate (actions, reducers) или RTK.
+- **Zustand:** минимальный **store** + **`useStore(s => s.cart)`** — подписка на **кусок** state; без Provider обязательного.
+- **Jotai/Recoil atoms:** **fine-grained** — компонент подписан на **atom**, не на весь store; derived atoms/computed.
+- **React Query/SWR:** **server state** (API cache, stale, refetch) — **не дублировать** users list в Redux, если Query уже кэширует.
+- **Правило:** один **source of truth per concern** — API cache в Query, UI modal в Zustand, не три копии users.
 
 **🟡 Джун**
 
@@ -780,9 +851,13 @@ Tooltip под кнопкой: в **`useEffect`** — вставили в DOM �
 
 **Суть (устно):**
 
-- **Babel:** JSX → JS, **polyfills** (preset-env), **class properties**; **не** typecheck (TS — отдельно).
-- **Bundler:** module graph, **HMR**, **code split**, **asset pipeline**.
-- **Vite:** dev esbuild, prod rollup; **fast refresh** vs classic HMR.
+- **Исходник:** JSX + modern JS + TypeScript — браузер **не понимает** JSX напрямую.
+- **Babel:** **транспiler** — JSX → `React.createElement` / `_jsx`; **preset-env** — optional chaining и т.д. → ES5/ES2015 для старых браузers; **не typecheck** (TS — отдельно, tsc или esbuild strip types).
+- **`@babel/preset-react` `runtime: 'automatic'`** — не нужен `import React` в каждом файле (React 17+ JSX transform).
+- **Bundler (Webpack/Vite):** собирает **module graph** → один или несколько **bundle/chunks**; **HMR/Fast Refresh** в dev; assets (images, css).
+- **Vite dev:** **esbuild** transform — быстрый cold start; **prod:** Rollup bundle. Webpack — всё через webpack, гибче legacy config.
+- **Env vars:** только **`NEXT_PUBLIC_*` / `VITE_*`** в client bundle — секреты **не** утекают через DefinePlugin/import.meta.env.
+- **Trend:** **SWC/esbuild** вместо Babel на 80% проектов; Babel — exotic plugins.
 
 **🟡 Джун**
 
@@ -808,9 +883,17 @@ Tooltip под кнопкой: в **`useEffect`** — вставили в DOM �
 
 **Суть (устно):**
 
-- **Double invoke** render/setup/cleanup для effects — выявить **non-idempotent** side effects.
-- **Deprecated API** warnings; **prepare** for concurrent features.
-- **Не** дублирует работу в production build.
+- **Зачем:** StrictMode — **тренажёр на dev**, чтобы баги всплыли **у тебя за компьютером**, а не у пользователя после деплоя. React 18+ умеет **монтировать → размонтировать → смонтировать** компонент снова (навигация, concurrent, будущие фичи). Если effect **не умеет cleanup** или render **делает side effect** — приложение ломается «тихо». StrictMode **намеренно** прогоняет жёсткий сценарий **только в dev**, чтобы это поймать заранее.
+- **`<StrictMode>`** — обёртка **только dev**; в **production** не меняет поведение (double invoke **нет**).
+- **Double invoke effects:** mount → cleanup → mount снова — проверка, что **cleanup реален** (interval снят, unsubscribe, abort). *Пример:* забыли `clearInterval` — в dev после «ухода» со страницы interval **ещё тикает**; без StrictMode заметишь только в prod.
+- **Double invoke render** (React 18+) — выявить **неидемпотентный** render (side effect в render body: fetch, `localStorage`, мутация объекта).
+- **Deprecated API warnings** — legacy context, string refs и т.д. — код, который **сломается** в следующих major.
+- **«Двойной fetch в dev»** — часто **ожидаемо** (effect без abort); fix: **AbortController**, idempotent subscribe, **не отключать** StrictMode.
+- StrictMode — **линтер жизненного цикла**, не баг React.
+
+**Как озвучить (без кода):**
+
+«Представь: пользователь открыл страницу и сразу ушёл. Effect успел запустить fetch и подписку, но cleanup не сработал — утечка, лишние запросы. StrictMode в dev **симулирует** такой сценарий: смонтировал → размонтировал → смонтировал снова. Если после «ухода» interval или подписка жива — баг виден сразу. В prod обёртки нет, но **правильный cleanup** нужен всегда.»
 
 **🟡 Джун**
 
@@ -833,9 +916,12 @@ Tooltip под кнопкой: в **`useEffect`** — вставили в DOM �
 
 **Суть (устно):**
 
-- **React DevTools:** components tree, props/state, **Profiler**, **⚛️** badge for highlights.
-- **Sources** breakpoints; **Log** render counts (temporary).
-- **Common bugs:** wrong deps, mutation, key, context over-render, stale closure.
+- **React DevTools Components:** дерево, **props/state** на момент render, **hooks** state; **highlight updates** — кто лишний раз мигает.
+- **Profiler:** record interaction → **flamegraph** — какой component longest render; **commit duration**.
+- **Sources + breakpoints** — остановить в handler/effect; не только `console.log`.
+- **Частые баги (чеклист):** wrong effect deps, **mutation state**, **index key**, fat context, stale closure, inline `{}`/`() =>` ломает memo.
+- **Redux DevTools** — time-travel actions; **Network** tab — API; **React error overlay** — component stack (source maps в monorepo).
+- **Production:** Sentry + breadcrumbs, session replay **без PII**; не логировать tokens.
 
 **🟡 Джун**
 
@@ -847,7 +933,7 @@ Tooltip под кнопкой: в **`useEffect`** — вставили в DOM �
 
 **🔴 Сеньор**
 
-- **Redux DevTools** time-travel — replay action sequence; production **session replay** (LogRocket) — только без PII в recording policy.
+- **Redux DevTools** time-travel — replay action sequence; production **session replay** (LogRocket) — только без PII в политике записи.
 - Error overlay **component stack** → source maps в monorepo (правильный path mapping).
 - Чеклист: deps effect, mutation state, index key, fat context, stale closure — системно, не random logs.
 
@@ -859,9 +945,12 @@ Tooltip под кнопкой: в **`useEffect`** — вставили в DOM �
 
 **Суть (устно):**
 
-- **`prop-types`** — runtime dev warnings; legacy JS codebases.
-- **TypeScript** — compile-time; **`React.FC`** vs explicit props type; **children** typing in React 18+.
-- **Default props** — default params vs `defaultProps` (deprecated for function components).
+- **TypeScript** — **compile-time**: interface/type props; ошибка **до** runtime; основной путь в modern React.
+- **`PropTypes`** — **runtime** warning в **dev** только; legacy JS codebases; дублировать TS + PropTypes редко нужно.
+- **`defaultProps`** для function components **deprecated** — defaults через **default parameters**: `function Button({ size = 'md' })`.
+- **Discriminated union** для variant: `{ variant: 'link'; href: string } | { variant: 'button'; onClick: … }` — TS **заставит** правильные поля.
+- **`ComponentProps<'button'>`** — расширить нативный button без копирования всех HTML-атрибутов.
+- **Runtime validation** на **границе API** — **Zod parse** ответа сервера; не PropTypes для JSON с backend.
 
 **🟡 Джун**
 
@@ -885,9 +974,13 @@ Tooltip под кнопкой: в **`useEffect`** — вставили в DOM �
 
 **Суть (устно):**
 
-- **Saga:** **`takeEvery`/`takeLatest`**, **debounce**, **race**, **fork/join**, **cancellation** через **`cancel`/` cancelled`**.
-- **Thunk:** проще, imperative chains; cancellation сложнее.
-- **RTK Query** — многие data workflows без ручных sagas.
+- **Thunk:** `dispatch(async (dispatch, getState) => { await fetch(); dispatch(...) })` — **imperative** цепочка; простой fetch→success простой.
+- **Saga:** **generator** `function* watchSearch() { yield takeLatest('SEARCH', fetchResults) }` — **declarative** watchers; отмена предыдущего fetch **из коробки** (`takeLatest`).
+- **Saga сильна:** **debounce** search, **race** (login vs logout), **fork** параллельные tasks, **retry** с backoff, **channel** websocket stream.
+- **Thunk слаба на:** отмена in-flight без AbortController вручную; сложные **многошаговые** flows readable хуже saga.
+- **RTK Query / React Query** — CRUD + cache **без** ручных saga/thunk для типичного API.
+- **Saga не ловит** React render errors — это **Error Boundary**; saga — Redux side effects only.
+- **Новый проект:** Query для server data; saga только если orchestration **реально** сложная (offline queue + ws + sync).
 
 **🟡 Джун**
 
@@ -903,6 +996,8 @@ Tooltip под кнопкой: в **`useEffect`** — вставили в DOM �
 - Saga **не ловит** React render errors — channel для errors, logging, retry policy отдельно от error boundary.
 - Тесты: **`redux-saga-test-plan`** — declarative step assertions.
 - Новый проект: **RTK Query** / React Query вместо ручных sagas для CRUD; saga остаётся для сложных orchestration (websocket + queue + offline sync).
+
+---
 
 ---
 
